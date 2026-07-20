@@ -1,5 +1,6 @@
 package com.example.orchestration.controller;
 
+import com.example.orchestration.model.SagaAggregateResponse;
 import com.example.orchestration.model.StepResponse;
 import com.example.orchestration.service.OrchestrationService;
 
@@ -36,5 +37,15 @@ public class OrchestrationController {
     public ResponseEntity<StepResponse> runStep3() {
         StepResponse response = orchestrationService.executeStep3();
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/saga/aggregate")
+    public ResponseEntity<SagaAggregateResponse> runSagaAggregated(
+            @RequestParam(value = "simulateError", defaultValue = "false") boolean simulateError) {
+        SagaAggregateResponse res = orchestrationService.executeSagaWorkFlowAggregated(simulateError);
+        if ("FAILED_ROLLED_BACK".equals(res.getOverallStatus())) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(res);
+        }
+        return ResponseEntity.ok(res);
     }
 }
