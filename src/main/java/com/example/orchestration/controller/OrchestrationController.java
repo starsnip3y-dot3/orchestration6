@@ -32,6 +32,18 @@ public class OrchestrationController {
         return ResponseEntity.ok(res);
     }
 
+    @PostMapping("/step1")
+    public ResponseEntity<StepResponse> runStep1() {
+        StepResponse response = orchestrationService.executeStep1();
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/step2")
+    public ResponseEntity<StepResponse> runStep2() {
+        StepResponse response = orchestrationService.executeStep2();
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/step3")
     public ResponseEntity<StepResponse> runStep3() {
         StepResponse response = orchestrationService.executeStep3();

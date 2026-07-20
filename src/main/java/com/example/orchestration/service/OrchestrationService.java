@@ -14,11 +14,63 @@ public class OrchestrationService {
     private static final Logger log = LoggerFactory.getLogger(OrchestrationService.class);
 
     private final WebClient webClient;
+
+    private StepResponse lastStepOneResult;
+    private StepResponse lastStepTwoResult;
+
     private StepResponse lastStepThreeResult;
 
     public OrchestrationService(WebClient.Builder webClientBuilder,
             @Value("${mock.base-url:http://localhost:8080}") String baseUrl) {
         this.webClient = webClientBuilder.baseUrl(baseUrl).build();
+    }
+
+    public StepResponse executeStep1() {
+        log.info("Step 1 started: Calling /mock1 endpoint");
+
+        Object payload = webClient.post()
+                .uri("/mock1")
+                .retrieve()
+                .bodyToMono(Object.class)
+                .block();
+
+        StepResponse response = new StepResponse();
+        response.setStep("step1");
+        response.setStatus("SUCCESS");
+        response.setMessage("Step 1 completed and mock1 response was stored");
+        response.setPayload(payload);
+
+        this.lastStepOneResult = response;
+        log.info("Step 1 completed successfully. Stored response from /mock1: {}", payload);
+        return response;
+    }
+
+    public StepResponse executeStep2() {
+        log.info("Step 2 started: Calling /mock2 endpoint");
+
+        Object payload = webClient.post()
+                .uri("/mock2")
+                .retrieve()
+                .bodyToMono(Object.class)
+                .block();
+
+        StepResponse response = new StepResponse();
+        response.setStep("step2");
+        response.setStatus("SUCCESS");
+        response.setMessage("Step 2 completed and mock2 response was stored");
+        response.setPayload(payload);
+
+        this.lastStepTwoResult = response;
+        log.info("Step 2 completed successfully. Stored response from /mock2: {}", payload);
+        return response;
+    }
+
+    public StepResponse getLastStepOneResult() {
+        return lastStepOneResult;
+    }
+
+    public StepResponse getLastStepTwoResult() {
+        return lastStepTwoResult;
     }
 
     public StepResponse executeStep3() {
