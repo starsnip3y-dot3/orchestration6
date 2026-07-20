@@ -1,6 +1,8 @@
 package com.example.orchestration.service;
 
+import com.example.orchestration.model.SagaAggregateResponse;
 import com.example.orchestration.model.StepResponse;
+import com.example.orchestration.model.StepResult;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,7 +10,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class OrchestrationService {
@@ -45,6 +51,102 @@ public class OrchestrationService {
 
     public StepResponse getLastStepThreeResult() {
         return lastStepThreeResult;
+    }
+
+    public SagaAggregateResponse executeSagaWorkFlowAggregated(boolean simulateError) {
+        log.info("SAGA AGGREGATED: Mulai flow transaksi");
+        String sagaId = UUID.randomUUID().toString();
+        Instant startedAt = Instant.now();
+        List<StepResult> steps = new ArrayList<>();
+        boolean step1Success = false;
+        boolean step2Success = false;
+
+        try {
+            log.info("SAGA AGGREGATED Step 1: req /api/inventory/check");
+            Object res1 = webClient.post()
+                    .uri("/api/inventory/check").retrieve().bodyToMono(Object.class).block();
+            log.info("SAGA AGGREGATED Step 1: Berhasil, response: {}", res1);
+            step1Success = true;
+            steps.add(new StepResult("Inventory-Check", "EXECUTION", "SUCCESS", res1));
+
+            log.info("SAGA AGGREGATED Step 2: req /api/payment/charge");
+            Object res2 = webClient.post()
+                    .uri("/api/payment/charge").retrieve().bodyToMono(Object.class).block();
+            log.info("SAGA AGGREGATED Step 2: Berhasil, response: {}", res2);
+            step2Success = true;
+            steps.add(new StepResult("Payment-Charge", "EXECUTION", "SUCCESS", res2));
+
+            log.info("SAGA AGGREGATED Step 3: req /api/shipping/create (simulateError={})", simulateError);
+            Object res3 = webClient.post()
+                    .uri(uriBuilder -> uriBuilder.path("/api/shipping/create")
+                            .queryParam("simulateError", simulateError)
+                            .build())
+                    .retrieve()
+                    .onStatus(
+                            status -> !status.is2xxSuccessful(),
+                            response -> response.bodyToMono(Map.class).map(body -> {
+                                String reason = body != null && body.get("message") != null
+                                        ? (String) body.get("message")
+                                        : "Shipping gagal dengan status " + response.statusCode();
+                                return new RuntimeException(reason);
+                            }))
+                    .bodyToMono(Object.class).block();
+            log.info("SAGA AGGREGATED Step 3: Berhasil, response: {}", res3);
+            steps.add(new StepResult("Shipping-Create", "EXECUTION", "SUCCESS", res3));
+
+            Instant finishedAt = Instant.now();
+            SagaAggregateResponse response = new SagaAggregateResponse();
+            response.setSagaId(sagaId);
+            response.setOverallStatus("SUCCESS");
+            response.setSummaryMessage("Semua step (Inventory, Payment, Shipping) berhasil dieksekusi tanpa rollback.");
+            response.setStartedAt(startedAt);
+            response.setFinishedAt(finishedAt);
+            response.setSteps(steps);
+            return response;
+
+        } catch (Exception e) {
+            log.error("SAGA AGGREGATED ERROR: {}", e.getMessage());
+            steps.add(new StepResult("Shipping-Create", "EXECUTION", "FAILED",
+                    Map.of("message", e.getMessage())));
+
+            if (step2Success) {
+                try {
+                    log.info("SAGA AGGREGATED ROLLBACK Step 2: /api/payment/refund");
+                    Object rollbackRes2 = webClient.post()
+                            .uri("/api/payment/refund").retrieve().bodyToMono(Object.class).block();
+                    log.info("SAGA AGGREGATED ROLLBACK STEP 2 BERHASIL: {}", rollbackRes2);
+                    steps.add(new StepResult("Payment-Refund", "COMPENSATION", "ROLLED_BACK", rollbackRes2));
+                } catch (Exception ex) {
+                    log.error("SAGA AGGREGATED ROLLBACK Step 2 FAILED: {}", ex.getMessage());
+                    steps.add(new StepResult("Payment-Refund", "COMPENSATION", "FAILED",
+                            Map.of("message", ex.getMessage())));
+                }
+            }
+
+            if (step1Success) {
+                try {
+                    log.info("SAGA AGGREGATED ROLLBACK Step 1: /api/inventory/cancel");
+                    Object rollbackRes1 = webClient.post()
+                            .uri("/api/inventory/cancel").retrieve().bodyToMono(Object.class).block();
+                    log.info("SAGA AGGREGATED ROLLBACK STEP 1 BERHASIL: {}", rollbackRes1);
+                    steps.add(new StepResult("Inventory-Cancel", "COMPENSATION", "ROLLED_BACK", rollbackRes1));
+                } catch (Exception ex) {
+                    log.error("SAGA AGGREGATED ROLLBACK Step 1 FAILED: {}", ex.getMessage());
+                    steps.add(new StepResult("Inventory-Cancel", "COMPENSATION", "FAILED",
+                            Map.of("message", ex.getMessage())));
+                }
+            }
+
+            Instant finishedAt = Instant.now();
+            SagaAggregateResponse response = new SagaAggregateResponse();
+            response.setSagaId(sagaId);
+            response.setOverallStatus("FAILED_ROLLED_BACK");
+            response.setSummaryMessage("Step Shipping gagal. Payment dan Inventory sudah di-rollback.");
+            response.setStartedAt(startedAt);
+            response.setFinishedAt(finishedAt);
+            response.setSteps(steps);
+            return response;
+        }
     }
 
     public StepResponse executeSagaWorkFlow(boolean simulateError) {
