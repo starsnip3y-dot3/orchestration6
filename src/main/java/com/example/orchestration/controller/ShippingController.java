@@ -7,22 +7,34 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/shipping")
 public class ShippingController {
 
     @PostMapping("/create")
-    public ResponseEntity<String> createShipping(
+    public ResponseEntity<Map<String, Object>> createShipping(
             @RequestParam(value = "simulateError", defaultValue = "false") boolean simulateError) {
         
         // Sengaja digagalkan untuk testing sistem Saga / Compensating Transaction
         if (simulateError) {
-            String errorResponse = "{\"service\": \"Shipping\", \"status\": \"FAILED\", \"message\": \"kurir pingsan di jalan!!\"}";
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(errorResponse);
+            Map<String, Object> errorPayload = new LinkedHashMap<>();
+            errorPayload.put("service", "Shipping");
+            errorPayload.put("status", "FAILED");
+            errorPayload.put("message", "kurir pingsan di jalan!!");
+            errorPayload.put("timestamp", Instant.now().toString());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(errorPayload);
         }
 
         // Jika berhasil
-        String jsonResponse = "{\"service\": \"Shipping\", \"status\": \"SUCCESS\", \"message\": \"resi diterbitkan: JNT-998877\"}";
-        return ResponseEntity.ok(jsonResponse);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("service", "Shipping");
+        payload.put("status", "SUCCESS");
+        payload.put("message", "resi diterbitkan: JNT-998877");
+        payload.put("timestamp", Instant.now().toString());
+        return ResponseEntity.ok(payload);
     }
 }

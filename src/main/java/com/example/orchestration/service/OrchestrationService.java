@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.Map;
+
 @Service
 public class OrchestrationService {
 
@@ -22,10 +24,10 @@ public class OrchestrationService {
     }
 
     public StepResponse executeStep3() {
-        log.info("Step 3 started: calling mock3 endpoint");
+        log.info("Step 3 started: calling shipping endpoint");
 
         Object payload = webClient.post()
-                .uri("/mock3")
+                .uri("/api/shipping/create")
                 .retrieve()
                 .bodyToMono(Object.class)
                 .block();
@@ -33,11 +35,11 @@ public class OrchestrationService {
         StepResponse response = new StepResponse();
         response.setStep("step3");
         response.setStatus("SUCCESS");
-        response.setMessage("step 3 completed and the mock3 response was stored");
+        response.setMessage("Step 3 (Shipping) selesai, info resi sudah tersimpan (contohnya).");
         response.setPayload(payload);
 
         this.lastStepThreeResult = response;
-        log.info("Step 3 completed. Stored response from mock3: {}", payload);
+        log.info("Step 3 completed. Stored response from shipping: {}", payload);
         return response;
     }
 
@@ -51,40 +53,50 @@ public class OrchestrationService {
         boolean step2Success = false;
         Object finalPayload = null;
         try {
-            log.info("SAGA Step 1: req /mock1");
+            log.info("SAGA Step 1: req /api/inventory/check");
             Object res1 = webClient.post()
-                    .uri("/mock1").retrieve().bodyToMono(Object.class).block();
+                    .uri("/api/inventory/check").retrieve().bodyToMono(Object.class).block();
             log.info("SAGA Step 1: Berhasil, response: {}", res1);
             step1Success = true;
-            log.info("SAGA Step 2: req /mock2");
+            log.info("SAGA Step 2: req /api/payment/charge");
             Object res2 = webClient.post()
-                    .uri("/mock2").retrieve().bodyToMono(Object.class).block();
+                    .uri("/api/payment/charge").retrieve().bodyToMono(Object.class).block();
             log.info("SAGA Step 2: Berhasil, response: {}", res2);
             step2Success = true;
 
-            log.info("SAGA Step 3: req /mock3 (simulateError={})", simulateError);
+            log.info("SAGA Step 3: req /api/shipping/create (simulateError={})", simulateError);
             Object res3 = webClient.post()
                     .uri(
-                            uriBuilder -> uriBuilder.path("/mock3").queryParam("simulateError", simulateError)
+                            uriBuilder -> uriBuilder.path("/api/shipping/create")
+                                    .queryParam("simulateError", simulateError)
                                     .build())
-
-                    .retrieve().bodyToMono(Object.class).block();
+                    .retrieve()
+                    .onStatus(
+                            status -> !status.is2xxSuccessful(),
+                            response -> response.bodyToMono(Map.class).map(body -> {
+                                String reason = body != null && body.get("message") != null
+                                        ? (String) body.get("message")
+                                        : "Shipping gagal dengan status " + response.statusCode();
+                                return new RuntimeException(reason);
+                            })
+                    )
+                    .bodyToMono(Object.class).block();
             log.info("SAGA Step 3: Berhasil, response: {}", res3);
             finalPayload = res3;
 
             StepResponse res = new StepResponse();
             res.setStep("SAGA_FLOW");
             res.setStatus("SUCCESS");
-            res.setMessage("FLOW SAGA BERHASIL DIEKSEKUSI SEMUANYA (HAPPY FLOW)");
+            res.setMessage("Transaksi Sudah aman, dari stok, pembayaran dan pengiriman");
             res.setPayload(finalPayload);
             return res;
         } catch (Exception e) {
             log.error("SAGA ERROR: Error during execution: {}", e.getMessage());
-            if (step2Success) { // s1 ss compensate
+            if (step2Success) {
                 try {
-                    log.info("SAGA ROLLBACK Step 2: Revert /mock2");
+                    log.info("SAGA ROLLBACK Step 2: Revert /api/payment");
                     Object rollbackRes2 = webClient.post()
-                            .uri("/mock2/rollback")
+                            .uri("/api/payment/refund")
                             .retrieve()
                             .bodyToMono(Object.class)
                             .block();
@@ -92,25 +104,27 @@ public class OrchestrationService {
                 } catch (Exception ex) {
                     log.error("SAGA ROLLBACK Step 2 FAILED: {}", ex.getMessage());
                 }
-                if (step1Success) { // s1 ss compensate
-                    try {
-                        log.info("SAGA ROLLBACK Step 1: Revert /mock1");
-                        Object rollbackRes1 = webClient.post()
-                                .uri("/mock1/rollback")
-                                .retrieve()
-                                .bodyToMono(Object.class)
-                                .block();
-                        log.info("SAGA ROLLBACK STEP 1 BERHASIL: {}", rollbackRes1);
-                    } catch (Exception ex) {
-                        log.error("SAGA ROLLBACK Step 1 FAILED: {}", ex.getMessage());
-                    }
+            }
+            if (step1Success) {
+                try {
+                    log.info("SAGA ROLLBACK Step 1: Revert /api/inventory");
+                    Object rollbackRes1 = webClient.post()
+                            .uri("/api/inventory/cancel")
+                            .retrieve()
+                            .bodyToMono(Object.class)
+                            .block();
+                    log.info("SAGA ROLLBACK STEP 1 BERHASIL: {}", rollbackRes1);
+                } catch (Exception ex) {
+                    log.error("SAGA ROLLBACK Step 1 FAILED: {}", ex.getMessage());
                 }
             }
 
             StepResponse ErrRes = new StepResponse();
             ErrRes.setStep("SAGA_FLOW");
             ErrRes.setStatus("FAILED");
-            ErrRes.setMessage("TRANSAKSI GAGAL DAN SUDAH DI ROLLBACK (Compensated), ALASAN: " + e.getMessage());
+            ErrRes.setMessage(
+                    "Ada error saat pengiriman. transaksi otomatis dibatalkan uang/stok sudah di-rollback dan aman. alasan: "
+                            + e.getMessage());
             return ErrRes;
         }
     }
