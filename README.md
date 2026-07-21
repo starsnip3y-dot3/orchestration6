@@ -24,7 +24,7 @@ Ketiga mock service dipanggil secara berurutan oleh `OrchestrationService` via H
 
 ---
 
-## Endpoint Agregasi (Tugas Anggota 5)
+## Endpoint Agregasi
 
 ### `POST /orchestration/saga/aggregate?simulateError={true|false}`
 
